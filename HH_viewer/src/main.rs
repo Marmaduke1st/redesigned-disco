@@ -9,7 +9,7 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 
-use hh_viewer::{default_hands_root, read_hand_text, render_hand_page, render_index, AppState};
+use hh_viewer::{default_hands_root, read_hand_text, render_dashboard, render_hand_page, render_index, AppState};
 
 #[tokio::main]
 async fn main() {
@@ -23,7 +23,8 @@ async fn main() {
     let state = AppState { hands_root };
 
     let app = Router::new()
-        .route("/", get(index))
+        .route("/", get(dashboard))
+        .route("/hands", get(index))
         .route("/hand/:hand_id", get(view_hand))
         .route("/download/:hand_id", get(download_hand))
         .with_state(state);
@@ -33,6 +34,12 @@ async fn main() {
         .await
         .expect("bind viewer port");
     axum::serve(listener, app).await.expect("serve viewer app");
+}
+
+async fn dashboard(State(state): State<AppState>) -> Result<Html<String>, (StatusCode, String)> {
+    render_dashboard(&state.hands_root)
+        .map(Html)
+        .map_err(internal_error)
 }
 
 async fn index(
