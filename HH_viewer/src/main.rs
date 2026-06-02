@@ -14,6 +14,12 @@ use hh_viewer::{default_hands_root, read_hand_text, render_hand_page, render_ind
 #[tokio::main]
 async fn main() {
     let hands_root = env::args_os().nth(1).map(PathBuf::from).unwrap_or_else(default_hands_root);
+    let port = env::args()
+        .nth(2)
+        .and_then(|value| value.parse::<u16>().ok())
+        .or_else(|| env::var("PORT").ok().and_then(|value| value.parse::<u16>().ok()))
+        .unwrap_or(3001);
+    let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let state = AppState { hands_root };
 
     let app = Router::new()
@@ -22,7 +28,7 @@ async fn main() {
         .route("/download/:hand_id", get(download_hand))
         .with_state(state);
 
-    let addr: SocketAddr = "127.0.0.1:3000".parse().expect("valid bind address");
+    let addr: SocketAddr = format!("{host}:{port}").parse().expect("valid bind address");
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind viewer port");
