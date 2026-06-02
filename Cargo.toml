@@ -3,4 +3,5 @@ resolver = "2"
 members = [
     "HH_splitter/GG_holdem",
     "HH_viewer",
+    "data_watcher",
 ]
