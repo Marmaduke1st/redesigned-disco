@@ -5,3 +5,5 @@
 /root/poker_core/target/debug/deps/libgg_holdem_splitter-fc2de34554feeb13.rmeta: HH_splitter/GG_holdem/src/lib.rs
 
 HH_splitter/GG_holdem/src/lib.rs:
+
+# env-dep:CARGO_MANIFEST_DIR=/root/poker_core/HH_splitter/GG_holdem

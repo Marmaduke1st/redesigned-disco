@@ -1,0 +1,6 @@
+# Generated hand exports from splitters.
+Hands/
+**/Hands/
+
+# Rust build artifacts.
+target/

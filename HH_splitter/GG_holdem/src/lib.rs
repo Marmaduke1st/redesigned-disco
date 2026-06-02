@@ -52,7 +52,9 @@ pub struct SplitResult {
     pub hand_files: usize,
 }
 
-pub fn split_inputs(input_path: &Path, output_dir: &Path) -> Result<SplitResult, SplitError> {
+pub fn split_inputs(input_path: &Path) -> Result<SplitResult, SplitError> {
+    let output_dir = default_output_dir();
+
     if !input_path.exists() {
         return Err(SplitError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -61,7 +63,7 @@ pub fn split_inputs(input_path: &Path, output_dir: &Path) -> Result<SplitResult,
     }
 
     if input_path.is_file() {
-        let hand_files = split_file(input_path, output_dir)?;
+        let hand_files = split_file(input_path, &output_dir)?;
         return Ok(SplitResult {
             source_files: 1,
             hand_files,
@@ -86,13 +88,17 @@ pub fn split_inputs(input_path: &Path, output_dir: &Path) -> Result<SplitResult,
 
     for entry in walk_txt_files(&input_root)? {
         source_files += 1;
-        hand_files += split_file(&entry, output_dir)?;
+        hand_files += split_file(&entry, &output_dir)?;
     }
 
     Ok(SplitResult {
         source_files,
         hand_files,
     })
+}
+
+fn default_output_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Hands")
 }
 
 pub fn split_file(source_path: &Path, output_dir: &Path) -> Result<usize, SplitError> {
