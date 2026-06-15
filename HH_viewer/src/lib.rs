@@ -13,6 +13,7 @@ pub struct AppState {
 pub struct HandFile {
     pub hand_id: String,
     pub path: PathBuf,
+    pub modified: Option<std::time::SystemTime>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,7 +38,9 @@ pub fn default_assets_root() -> PathBuf {
 /// Resolves a request path like `PokerCore logo Transparent.png` to a path
 /// inside `assets_root` and reads the file content atomically to prevent TOCTOU attacks.
 /// Returns `None` if the request escapes the root (e.g. via `..`, absolute paths, or separators)
-/// or if the file cannot be read.
+/// or if the file cannot be read or exceeds the size limit.
+const MAX_STATIC_FILE_SIZE: u64 = 10 * 1024 * 1024; // 10 MB
+
 pub fn resolve_static_path_and_read(assets_root: &Path, requested: &str) -> Option<Vec<u8>> {
     if requested.is_empty() {
         return None;
@@ -61,7 +64,14 @@ pub fn resolve_static_path_and_read(assets_root: &Path, requested: &str) -> Opti
     
     // Read the file content while holding the file handle
     let metadata = file.metadata().ok()?;
-    let mut buffer = Vec::with_capacity(metadata.len() as usize);
+    let file_size = metadata.len();
+    
+    // Enforce file size limit to prevent memory exhaustion
+    if file_size > MAX_STATIC_FILE_SIZE {
+        return None;
+    }
+    
+    let mut buffer = Vec::with_capacity(file_size as usize);
     std::io::BufReader::new(file).read_to_end(&mut buffer).ok()?;
     Some(buffer)
 }
@@ -100,6 +110,7 @@ pub fn list_hands(root: &Path, query: Option<&str>) -> io::Result<Vec<HandFile>>
                 hands.push(HandFile {
                     hand_id: hand_id.to_string(),
                     path: root.to_path_buf(),
+                    modified: None,
                 });
             }
         }
@@ -127,14 +138,9 @@ pub fn dashboard_stats(root: &Path) -> io::Result<DashboardStats> {
 
     collect_hands_for_dashboard(root, &mut hands, &mut total_bytes)?;
     hands.sort_by(|left, right| {
-        let left_modified = fs::metadata(&left.path)
-            .and_then(|metadata| metadata.modified())
-            .ok();
-        let right_modified = fs::metadata(&right.path)
-            .and_then(|metadata| metadata.modified())
-            .ok();
-        right_modified
-            .cmp(&left_modified)
+        right
+            .modified
+            .cmp(&left.modified)
             .then_with(|| right.hand_id.cmp(&left.hand_id))
     });
 
@@ -149,17 +155,28 @@ pub fn dashboard_stats(root: &Path) -> io::Result<DashboardStats> {
 }
 
 pub fn find_hand_path(root: &Path, hand_id: &str) -> PathBuf {
+    find_hand_path_with_visited(root, hand_id, &mut std::collections::HashSet::new())
+}
+
+fn find_hand_path_with_visited(root: &Path, hand_id: &str, visited: &mut std::collections::HashSet<PathBuf>) -> PathBuf {
     if root.is_file() {
         if root.file_stem().and_then(|stem| stem.to_str()) == Some(hand_id) {
             return root.to_path_buf();
         }
     }
 
+    // Track visited directories to prevent infinite recursion from symlinks
+    let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+    if visited.contains(&canonical_root) {
+        return root.join(format!("{hand_id}.txt"));
+    }
+    visited.insert(canonical_root);
+
     if let Ok(entries) = fs::read_dir(root) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let nested = find_hand_path(&path, hand_id);
+                let nested = find_hand_path_with_visited(&path, hand_id, visited);
                 if nested.exists() {
                     return nested;
                 }
@@ -187,7 +204,7 @@ pub fn render_dashboard(root: &Path) -> io::Result<String> {
 
     html.push_str("<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>PokerCore</title>");
     html.push_str("<style>body{font-family:system-ui,sans-serif;margin:0;background:#0f141a;color:#e6edf3}header{padding:28px 24px;background:linear-gradient(135deg,#121a24,#0b1117);border-bottom:1px solid #233044}main{padding:24px;max-width:1200px;margin:0 auto;display:grid;gap:20px}.topbar{display:flex;justify-content:space-between;align-items:end;gap:16px;flex-wrap:wrap}.brand{display:flex;align-items:center}.brand img{display:block;height:96px;width:auto;max-width:100%}.actions{display:flex;gap:12px;flex-wrap:wrap}.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 16px;border-radius:12px;border:1px solid #2f3d50;background:#17212b;color:#e6edf3;text-decoration:none}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.card{background:#111823;border:1px solid #243041;border-radius:16px;padding:18px}.value{font-size:2rem;font-weight:700;margin-top:8px}.muted{color:#94a3b8}.recent{background:#111823;border:1px solid #243041;border-radius:16px;overflow:hidden}table{width:100%;border-collapse:collapse}th,td{padding:14px 16px;border-bottom:1px solid #1f2937;text-align:left}th{font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;background:#0c1219}tr:hover{background:#151e29}a{color:#93c5fd;text-decoration:none}</style>");
-    html.push_str("</head><body><header><div class=\"topbar\"><div class=\"brand\"><img src=\"/static/PokerCore%20logo%20Transparent%20cropped.png\" alt=\"PokerCore\"></div><div class=\"actions\"><a class=\"btn\" href=\"/hands\">Open Hand Viewer</a></div></div></header><main>");
+    html.push_str("</head><body><header><div class=\"topbar\"><div class=\"brand\"><img src=\"/static/PokerCore logo Transparent cropped.png\" alt=\"PokerCore\"></div><div class=\"actions\"><a class=\"btn\" href=\"/hands\">Open Hand Viewer</a></div></div></header><main>");
 
     html.push_str("<section class=\"cards\">");
     let _ = write!(html, "<div class=\"card\"><div class=\"muted\">Total Hands</div><div class=\"value\">{}</div></div>", stats.total_hands);
@@ -307,6 +324,7 @@ fn collect_hands(root: &Path, query: Option<&str>, hands: &mut Vec<HandFile>) ->
         hands.push(HandFile {
             hand_id: hand_id.to_string(),
             path,
+            modified: None,
         });
     }
 
@@ -321,10 +339,12 @@ fn collect_hands_for_dashboard(
     if root.is_file() {
         let metadata = fs::metadata(root)?;
         *total_bytes += metadata.len();
+        let modified = metadata.modified().ok();
         if let Some(hand_id) = root.file_stem().and_then(|stem| stem.to_str()) {
             hands.push(HandFile {
                 hand_id: hand_id.to_string(),
                 path: root.to_path_buf(),
+                modified,
             });
         }
         return Ok(());
@@ -343,7 +363,9 @@ fn collect_hands_for_dashboard(
             continue;
         }
 
-        *total_bytes += fs::metadata(&path)?.len();
+        let metadata = fs::metadata(&path)?;
+        *total_bytes += metadata.len();
+        let modified = metadata.modified().ok();
 
         let Some(hand_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
             continue;
@@ -352,6 +374,7 @@ fn collect_hands_for_dashboard(
         hands.push(HandFile {
             hand_id: hand_id.to_string(),
             path,
+            modified,
         });
     }
 

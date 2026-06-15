@@ -108,10 +108,19 @@ async fn static_asset(
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("static asset not found: {name}")))?;
 
     let content_type = static_content_type(&state.assets_root.join(&name));
+    let content_length = bytes.len();
     let mut response = bytes.into_response();
     response.headers_mut().insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static(content_type),
+    );
+    response.headers_mut().insert(
+        header::CONTENT_LENGTH,
+        HeaderValue::from(content_length),
+    );
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"), // 1 day
     );
     Ok(response)
 }
