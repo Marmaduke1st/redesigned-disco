@@ -9,27 +9,43 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 
-use hh_viewer::{default_hands_root, read_hand_text, render_dashboard, render_hand_page, render_index, AppState};
+use hh_viewer::{
+    default_assets_root, default_hands_root, read_hand_text, render_dashboard, render_hand_page,
+    render_index, resolve_static_path_and_read, static_content_type, AppState,
+};
 
 #[tokio::main]
 async fn main() {
-    let hands_root = env::args_os().nth(1).map(PathBuf::from).unwrap_or_else(default_hands_root);
+    let hands_root = env::args_os()
+        .nth(1)
+        .map(PathBuf::from)
+        .unwrap_or_else(default_hands_root);
     let port = env::args()
         .nth(2)
         .and_then(|value| value.parse::<u16>().ok())
-        .or_else(|| env::var("PORT").ok().and_then(|value| value.parse::<u16>().ok()))
+        .or_else(|| {
+            env::var("PORT")
+                .ok()
+                .and_then(|value| value.parse::<u16>().ok())
+        })
         .unwrap_or(3001);
     let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let state = AppState { hands_root };
+    let state = AppState {
+        hands_root,
+        assets_root: default_assets_root(),
+    };
 
     let app = Router::new()
         .route("/", get(dashboard))
         .route("/hands", get(index))
         .route("/hand/:hand_id", get(view_hand))
         .route("/download/:hand_id", get(download_hand))
+        .route("/static/:name", get(static_asset))
         .with_state(state);
 
-    let addr: SocketAddr = format!("{host}:{port}").parse().expect("valid bind address");
+    let addr: SocketAddr = format!("{host}:{port}")
+        .parse()
+        .expect("valid bind address");
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("bind viewer port");
@@ -82,4 +98,20 @@ async fn download_hand(
 
 fn internal_error<E: std::fmt::Display>(error: E) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+}
+
+async fn static_asset(
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> Result<Response, (StatusCode, String)> {
+    let bytes = resolve_static_path_and_read(&state.assets_root, &name)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("static asset not found: {name}")))?;
+
+    let content_type = static_content_type(&state.assets_root.join(&name));
+    let mut response = bytes.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static(content_type),
+    );
+    Ok(response)
 }
