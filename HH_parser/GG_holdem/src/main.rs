@@ -1,7 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
-use gg_holdem_splitter::split_inputs;
+use gg_holdem_parser::parse_inputs;
 
 fn main() {
     let mut args = env::args_os().skip(1);
@@ -10,7 +10,7 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/root/PokerCoreData/GG Poker/Holdem"));
 
-    match split_inputs(&input_path) {
+    match parse_inputs(&input_path) {
         Ok(result) => {
             println!(
                 "processed {} source files and wrote {} hand files to {}",

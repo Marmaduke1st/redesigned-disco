@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use gg_holdem_splitter::split_inputs;
+use gg_holdem_parser::parse_inputs;
 
 fn main() {
     let watch_path = env::args()
@@ -19,15 +19,33 @@ fn main() {
 
     println!("Watching directory: {}", watch_path.display());
     println!("Checking every 60 seconds for new hand files");
-    println!("New hands will be automatically processed and split to HH_splitter/GG_holdem/Hands");
+    println!("New hands will be automatically processed and split to HH_parser/GG_holdem/Hands");
 
     let output_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("HH_splitter/GG_holdem/Hands");
+        .join("HH_parser/GG_holdem/Hands");
 
     let mut known_files = scan_directory(&watch_path);
     println!("Initial scan found {} .txt files", known_files.len());
+
+    // Process all existing files on startup
+    if !known_files.is_empty() {
+        println!("Processing existing files...");
+        match parse_inputs(&watch_path) {
+            Ok(result) => {
+                println!(
+                    "Processed {} source files, wrote {} hand files to {}",
+                    result.source_files,
+                    result.hand_files,
+                    output_dir.display()
+                );
+            }
+            Err(err) => {
+                eprintln!("Failed to parse hands: {}", err);
+            }
+        }
+    }
 
     loop {
         std::thread::sleep(Duration::from_secs(60));
@@ -41,7 +59,7 @@ fn main() {
                 println!("  - {}", file.display());
             }
 
-            match split_inputs(&watch_path) {
+            match parse_inputs(&watch_path) {
                 Ok(result) => {
                     println!(
                         "Processed {} source files, wrote {} hand files to {}",
@@ -51,7 +69,7 @@ fn main() {
                     );
                 }
                 Err(err) => {
-                    eprintln!("Failed to split hands: {}", err);
+                    eprintln!("Failed to parse hands: {}", err);
                 }
             }
 

@@ -4,67 +4,67 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
-pub enum SplitError {
+pub enum ParseError {
     Io(std::io::Error),
     MissingHandHeader(PathBuf),
     DuplicateHandId { hand_id: String, first: PathBuf, second: PathBuf },
     InvalidOutputPath(PathBuf),
 }
 
-impl Display for SplitError {
+impl Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            SplitError::Io(err) => write!(f, "I/O error: {err}"),
-            SplitError::MissingHandHeader(path) => {
+            ParseError::Io(err) => write!(f, "I/O error: {err}"),
+            ParseError::MissingHandHeader(path) => {
                 write!(f, "no GG hand headers found in {}", path.display())
             }
-            SplitError::DuplicateHandId { hand_id, first, second } => write!(
+            ParseError::DuplicateHandId { hand_id, first, second } => write!(
                 f,
                 "duplicate hand id {hand_id} found in {} and {}",
                 first.display(),
                 second.display()
             ),
-            SplitError::InvalidOutputPath(path) => {
+            ParseError::InvalidOutputPath(path) => {
                 write!(f, "output path cannot be inside input scan path: {}", path.display())
             }
         }
     }
 }
 
-impl Error for SplitError {
+impl Error for ParseError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            SplitError::Io(err) => Some(err),
+            ParseError::Io(err) => Some(err),
             _ => None,
         }
     }
 }
 
-impl From<std::io::Error> for SplitError {
+impl From<std::io::Error> for ParseError {
     fn from(value: std::io::Error) -> Self {
-        SplitError::Io(value)
+        ParseError::Io(value)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SplitResult {
+pub struct ParseResult {
     pub source_files: usize,
     pub hand_files: usize,
 }
 
-pub fn split_inputs(input_path: &Path) -> Result<SplitResult, SplitError> {
+pub fn parse_inputs(input_path: &Path) -> Result<ParseResult, ParseError> {
     let output_dir = default_output_dir();
 
     if !input_path.exists() {
-        return Err(SplitError::Io(std::io::Error::new(
+        return Err(ParseError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!("input path does not exist: {}", input_path.display()),
         )));
     }
 
     if input_path.is_file() {
-        let hand_files = split_file(input_path, &output_dir)?;
-        return Ok(SplitResult {
+        let hand_files = parse_file(input_path, &output_dir)?;
+        return Ok(ParseResult {
             source_files: 1,
             hand_files,
         });
@@ -80,7 +80,7 @@ pub fn split_inputs(input_path: &Path) -> Result<SplitResult, SplitError> {
     })?;
 
     if output_root.starts_with(&input_root) {
-        return Err(SplitError::InvalidOutputPath(output_root));
+        return Err(ParseError::InvalidOutputPath(output_root));
     }
 
     let mut source_files = 0;
@@ -88,10 +88,10 @@ pub fn split_inputs(input_path: &Path) -> Result<SplitResult, SplitError> {
 
     for entry in walk_txt_files(&input_root)? {
         source_files += 1;
-        hand_files += split_file(&entry, &output_dir)?;
+        hand_files += parse_file(&entry, &output_dir)?;
     }
 
-    Ok(SplitResult {
+    Ok(ParseResult {
         source_files,
         hand_files,
     })
@@ -101,12 +101,12 @@ fn default_output_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Hands")
 }
 
-pub fn split_file(source_path: &Path, output_dir: &Path) -> Result<usize, SplitError> {
+pub fn parse_file(source_path: &Path, output_dir: &Path) -> Result<usize, ParseError> {
     let text = fs::read_to_string(source_path)?;
     let hand_ranges = hand_ranges(&text);
 
     if hand_ranges.is_empty() {
-        return Err(SplitError::MissingHandHeader(source_path.to_path_buf()));
+        return Err(ParseError::MissingHandHeader(source_path.to_path_buf()));
     }
 
     fs::create_dir_all(output_dir)?;
@@ -117,16 +117,8 @@ pub fn split_file(source_path: &Path, output_dir: &Path) -> Result<usize, SplitE
         let target_path = output_dir.join(format!("{hand_id}.txt"));
 
         if target_path.exists() {
-            let existing = fs::read_to_string(&target_path)?;
-            if existing == hand_text {
-                continue;
-            }
-
-            return Err(SplitError::DuplicateHandId {
-                hand_id,
-                first: source_path.to_path_buf(),
-                second: target_path,
-            });
+            // Hand already exists in output directory, skip it
+            continue;
         }
 
         fs::write(target_path, format!("{hand_text}\n"))?;
@@ -136,14 +128,14 @@ pub fn split_file(source_path: &Path, output_dir: &Path) -> Result<usize, SplitE
     Ok(written)
 }
 
-fn walk_txt_files(root: &Path) -> Result<Vec<PathBuf>, SplitError> {
+fn walk_txt_files(root: &Path) -> Result<Vec<PathBuf>, ParseError> {
     let mut files = Vec::new();
     collect_txt_files(root, &mut files)?;
     files.sort();
     Ok(files)
 }
 
-fn collect_txt_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), SplitError> {
+fn collect_txt_files(path: &Path, out: &mut Vec<PathBuf>) -> Result<(), ParseError> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let entry_path = entry.path();
